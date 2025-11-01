@@ -1,0 +1,308 @@
+'use client';
+
+import { useChat } from '@ai-sdk/react';
+import { useState, useMemo, useEffect } from 'react';
+import { MessageItem } from '@/components/chat/MessageItem';
+import { LabNotebook } from '@/components/notebook/LabNotebook';
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton
+} from '@/components/ai-elements/conversation';
+import { Suggestion, Suggestions } from '@/components/ai-elements/elements/suggestion';
+import { suggestions } from '@/lib/data/suggestions';
+import { extractFollowupQuestion } from '@/lib/utils/followup';
+import { Send, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+
+export default function ChatPage() {
+  const [input, setInput] = useState('');
+  const [suggestedFollowup, setSuggestedFollowup] = useState<string | null>(null);
+  const { messages, sendMessage, status, error } = useChat();
+
+  // Extract follow-up question from last assistant message
+  useEffect(() => {
+    // Only extract when not streaming and messages exist
+    if (status !== 'streaming' && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+
+      // Only process assistant messages
+      if (lastMessage.role === 'assistant' && lastMessage.parts) {
+        // Get all text parts and combine them
+        const textParts = lastMessage.parts
+          .filter((part: any) => part.type === 'text')
+          .map((part: any) => part.text || '')
+          .join('\n');
+
+        // Extract follow-up question
+        const followup = extractFollowupQuestion(textParts);
+
+        if (followup) {
+          console.log('[Followup] Extracted:', followup);
+          setSuggestedFollowup(followup);
+        } else {
+          // Clear if no follow-up found
+          setSuggestedFollowup(null);
+        }
+      }
+    }
+  }, [messages, status]);
+
+  // Extract all artifacts from messages for the notebook
+  // Use stringified messages length and IDs to prevent unnecessary recomputation
+  const messageSignature = useMemo(
+    () => messages.map(m => m.id).join(','),
+    [messages]
+  );
+
+  const artifacts = useMemo(() => {
+    const allArtifacts: any[] = [];
+
+    // Regex for code blocks in markdown
+    const jsxCodeBlockRegex = /```(?:jsx|javascript|tsx|js|typescript|ts)[\s\n]([\s\S]*?)```/g;
+
+    // Regex for artifact tags (e.g., <artifact>...</artifact>)
+    const artifactTagRegex = /<artifact[^>]*>([\s\S]*?)<\/artifact>/g;
+
+    messages.forEach((message) => {
+      if (message.role === 'assistant' && message.parts) {
+        message.parts.forEach((part: any) => {
+          if (part.type === 'text') {
+            const text = part.text || '';
+
+            // Extract from markdown code blocks
+            const codeBlockMatches = Array.from(text.matchAll(jsxCodeBlockRegex));
+            codeBlockMatches.forEach((match: any, idx: number) => {
+              allArtifacts.push({
+                id: `artifact-${message.id}-codeblock-${idx}`,
+                code: match[1].trim(),
+                createdAt: 0,
+              });
+            });
+
+            // Extract from artifact tags
+            const artifactTagMatches = Array.from(text.matchAll(artifactTagRegex));
+            artifactTagMatches.forEach((match: any, idx: number) => {
+              // Content inside <artifact> tags should be JSX code
+              const artifactContent = match[1].trim();
+              // Check if it contains code blocks, extract them
+              const innerCodeMatches = Array.from(artifactContent.matchAll(jsxCodeBlockRegex));
+
+              if (innerCodeMatches.length > 0) {
+                innerCodeMatches.forEach((innerMatch: any, innerIdx: number) => {
+                  allArtifacts.push({
+                    id: `artifact-${message.id}-tag-${idx}-${innerIdx}`,
+                    code: innerMatch[1].trim(),
+                    createdAt: 0,
+                  });
+                });
+              } else {
+                // If no code block inside, treat the whole content as JSX
+                allArtifacts.push({
+                  id: `artifact-${message.id}-tag-${idx}`,
+                  code: artifactContent,
+                  createdAt: 0,
+                });
+              }
+            });
+          }
+        });
+      }
+    });
+
+    console.log('[Artifacts] Extracted count:', allArtifacts.length);
+    if (allArtifacts.length > 0) {
+      console.log('[Artifacts] IDs:', allArtifacts.map(a => a.id));
+    }
+
+    return allArtifacts;
+  }, [messageSignature, messages]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (status !== 'ready') return;
+
+    // If input has text, send it
+    if (input.trim()) {
+      sendMessage({ text: input });
+      setInput('');
+      setSuggestedFollowup(null); // Clear suggestion after sending
+    }
+    // If input is empty but we have a suggestion, send the suggestion
+    else if (suggestedFollowup) {
+      console.log('[Followup] Sending suggested question:', suggestedFollowup);
+      sendMessage({ text: suggestedFollowup });
+      setSuggestedFollowup(null); // Clear suggestion after sending
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    setInput(newValue);
+
+    // Clear suggestion as soon as user starts typing
+    if (newValue.length > 0 && suggestedFollowup) {
+      setSuggestedFollowup(null);
+    }
+  };
+
+  const handleSuggestionClick = (suggestion: string) => {
+    if (status === 'ready') {
+      sendMessage({ text: suggestion });
+      setInput('');
+      setSuggestedFollowup(null); // Clear any existing follow-up
+    }
+  };
+
+  // Determine if notebook should be shown
+  const hasArtifacts = artifacts.length > 0;
+
+  return (
+    <div className="flex h-screen relative bg-background">
+
+      {messages.length === 0 ? (
+        // Welcome Screen - Full Page
+        <div className="w-full h-full flex items-center justify-center relative">
+          {/* Welcome Content - Centered */}
+          <div className="text-center px-4 sm:px-8 max-w-6xl mx-auto w-full">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-foreground mb-4">
+              MCP Web Client
+            </h1>
+            <p className="text-lg sm:text-xl text-muted-foreground mb-12">
+              AI-powered data analysis with Model Context Protocol
+            </p>
+
+            {/* Centered Input */}
+            <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
+              <div className="flex gap-3 sm:gap-4">
+                <div className="relative flex-1">
+                  <input
+                    value={input}
+                    onChange={handleInputChange}
+                    disabled={status !== 'ready'}
+                    className="w-full border border-border rounded-lg px-6 py-4 text-base sm:text-lg bg-card backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-ring transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder={suggestedFollowup ? "" : "Ask about your data..."}
+                  />
+                  {/* Show suggested follow-up when input is empty and suggestion exists */}
+                  {!input && suggestedFollowup && status === 'ready' && (
+                    <div className="absolute inset-0 px-6 py-4 text-base sm:text-lg pointer-events-none flex items-center text-muted-foreground/70">
+                      {suggestedFollowup}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  type="submit"
+                  disabled={(!input.trim() && !suggestedFollowup) || status !== 'ready'}
+                  className="px-6 py-4 text-base sm:text-lg rounded-lg"
+                >
+                  {status === 'streaming' ? (
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                  ) : (
+                    <Send className="w-6 h-6" />
+                  )}
+                </Button>
+              </div>
+            </form>
+
+            {/* Suggestion Chips */}
+            <div className="max-w-4xl mx-auto mt-6 sm:mt-8">
+              <Suggestions>
+                {suggestions.map((suggestion) => (
+                  <Suggestion
+                    key={suggestion}
+                    suggestion={suggestion}
+                    onClick={handleSuggestionClick}
+                    disabled={status !== 'ready'}
+                  />
+                ))}
+              </Suggestions>
+            </div>
+          </div>
+        </div>
+      ) : (
+        // Chat Area - Expands to full width when no artifacts, 50% when notebook is present
+        <div className={`flex flex-col transition-all duration-300 ${hasArtifacts ? 'w-1/2 border-r' : 'w-full'} border-border relative`}>
+          {/* Header */}
+          <div className="bg-card backdrop-blur-sm border-b border-border px-3 sm:px-4 md:px-6 py-3 sm:py-4 md:py-5 flex-shrink-0">
+            <div className={hasArtifacts ? '' : 'max-w-7xl mx-auto'}>
+              <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
+                <span className="inline-block w-2 h-2 sm:w-2.5 sm:h-2.5 bg-primary rounded-full" />
+                AI Assistant
+              </h1>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                AI-powered data analysis with MCP tools
+              </p>
+            </div>
+          </div>
+
+          {/* Messages Container with AI SDK Conversation */}
+          <Conversation className="flex-1">
+            <ConversationContent className={`${hasArtifacts ? 'px-3 sm:px-4 md:px-6' : 'max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 xl:px-12'} w-full space-y-3 sm:space-y-4`}>
+              {messages.map((message, idx) => (
+                <MessageItem
+                  key={message.id}
+                  message={message}
+                  isStreaming={status === 'streaming' && idx === messages.length - 1}
+                />
+              ))}
+
+              {error && (
+                <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 text-destructive">
+                  <p className="font-semibold">Error</p>
+                  <p className="text-sm mt-1">{error.message}</p>
+                </div>
+              )}
+            </ConversationContent>
+
+            <ConversationScrollButton />
+          </Conversation>
+
+          {/* Input - Fixed at bottom */}
+          <div className="bg-card backdrop-blur-sm border-t border-border p-6 flex-shrink-0">
+            <form onSubmit={handleSubmit} className={hasArtifacts ? '' : 'max-w-7xl mx-auto'}>
+              <div className="flex gap-3">
+                <div className="relative flex-1">
+                  <input
+                    value={input}
+                    onChange={handleInputChange}
+                    disabled={status !== 'ready'}
+                    className="w-full border border-border rounded-lg px-6 py-4 text-lg bg-background backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-ring transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder={suggestedFollowup ? "" : "Ask about your data..."}
+                  />
+                  {/* Show suggested follow-up when input is empty and suggestion exists */}
+                  {!input && suggestedFollowup && status === 'ready' && (
+                    <div className="absolute inset-0 px-6 py-4 text-lg pointer-events-none flex items-center text-muted-foreground/70">
+                      {suggestedFollowup}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  type="submit"
+                  disabled={(!input.trim() && !suggestedFollowup) || status !== 'ready'}
+                  size="lg"
+                  className="gap-2"
+                >
+                  {status === 'streaming' ? (
+                    <>
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                      <span>Sending...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-6 h-6" />
+                      <span>Send</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Lab Notebook - Right 50% */}
+      {hasArtifacts && <LabNotebook artifacts={artifacts} />}
+    </div>
+  );
+}

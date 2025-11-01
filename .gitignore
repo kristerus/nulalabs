@@ -46,7 +46,4 @@ next-env.d.ts
 
 
 #js files
-*.js
-*.jsx
-*.ts
-*.tsx
+*.json
