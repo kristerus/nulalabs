@@ -11,7 +11,8 @@ import {
 import { Suggestion, Suggestions } from '@/components/ai-elements/elements/suggestion';
 import { suggestions } from '@/lib/data/suggestions';
 import { extractFollowupQuestion } from '@/lib/utils/followup';
-import { Send, Loader2, Network } from 'lucide-react';
+import { extractPlans } from '@/lib/utils/extractPlans';
+import { Send, Loader2, Network, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { RightPanel } from '@/components/RightPanel';
 import { buildWorkflowGraph } from '@/lib/workflow/workflowBuilder';
@@ -120,6 +121,11 @@ export default function ChatPage() {
     return allArtifacts;
   }, [messageSignature, messages]);
 
+  // Extract all plans from messages
+  const plans = useMemo(() => {
+    return extractPlans(messages);
+  }, [messageSignature, messages]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -159,20 +165,21 @@ export default function ChatPage() {
 
   // Determine if right panel should be shown
   const hasArtifacts = artifacts.length > 0;
+  const hasPlans = plans.length > 0;
 
   // Check if there's workflow data (messages with analysis)
   const workflowGraph = useMemo(() => buildWorkflowGraph(messages), [messages]);
   const hasWorkflow = workflowGraph.nodes.length > 0;
 
-  // Show right panel if either artifacts or workflow exists AND panel is open
-  const showRightPanel = (hasArtifacts || (hasWorkflow && rightPanelOpen));
+  // Show right panel if either artifacts, plans, or workflow exists AND panel is open
+  const showRightPanel = (hasArtifacts || hasPlans || (hasWorkflow && rightPanelOpen));
 
-  // Auto-open panel when artifacts appear (existing behavior for notebook)
+  // Auto-open panel when artifacts or plans appear
   useEffect(() => {
-    if (hasArtifacts && !rightPanelOpen) {
+    if ((hasArtifacts || hasPlans) && !rightPanelOpen) {
       setRightPanelOpen(true);
     }
-  }, [hasArtifacts, rightPanelOpen]);
+  }, [hasArtifacts, hasPlans, rightPanelOpen]);
 
   return (
     <div className="flex h-screen relative bg-background">
@@ -251,19 +258,32 @@ export default function ChatPage() {
                   AI-powered data analysis with MCP tools
                 </p>
               </div>
-              {hasWorkflow && (
-                <Button
-                  variant={rightPanelOpen && !hasArtifacts ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setRightPanelOpen(!rightPanelOpen)}
-                  className="gap-2"
-                >
-                  <Network size={16} />
-                  <span className="hidden sm:inline">
-                    {rightPanelOpen && !hasArtifacts ? "Hide" : "Workflow"}
-                  </span>
-                </Button>
-              )}
+              <div className="flex gap-2">
+                {hasPlans && (
+                  <Button
+                    variant={rightPanelOpen && !hasArtifacts && !hasWorkflow ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setRightPanelOpen(!rightPanelOpen)}
+                    className="gap-2"
+                  >
+                    <Sparkles size={16} />
+                    <span className="hidden sm:inline">Plans</span>
+                  </Button>
+                )}
+                {hasWorkflow && (
+                  <Button
+                    variant={rightPanelOpen && !hasArtifacts && !hasPlans ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setRightPanelOpen(!rightPanelOpen)}
+                    className="gap-2"
+                  >
+                    <Network size={16} />
+                    <span className="hidden sm:inline">
+                      {rightPanelOpen && !hasArtifacts && !hasPlans ? "Hide" : "Workflow"}
+                    </span>
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -332,15 +352,17 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Right Panel - Shows workflow, notebook, or both with tabs */}
+      {/* Right Panel - Shows plans, workflow, notebook, or combination with tabs */}
       {showRightPanel && (
         <div className="w-1/2 h-full">
           <RightPanel
             messages={messages}
             artifacts={artifacts}
+            plans={plans}
             hasWorkflow={hasWorkflow}
             hasArtifacts={hasArtifacts}
-            initialTab={hasArtifacts ? "notebook" : "workflow"}
+            hasPlans={hasPlans}
+            initialTab={hasPlans ? "plans" : hasArtifacts ? "notebook" : "workflow"}
             onClose={() => setRightPanelOpen(false)}
           />
         </div>
