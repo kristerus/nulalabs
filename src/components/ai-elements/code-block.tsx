@@ -5,11 +5,8 @@ import { cn } from "@/lib/utils";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactNode } from "react";
 import { createContext, useContext, useState } from "react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import {
-  oneDark,
-  oneLight,
-} from "react-syntax-highlighter/dist/esm/styles/prism";
+import { Highlight, themes } from "prism-react-renderer";
+import { useTheme } from "next-themes";
 
 type CodeBlockContextType = {
   code: string;
@@ -33,71 +30,71 @@ export const CodeBlock = ({
   className,
   children,
   ...props
-}: CodeBlockProps) => (
-  <CodeBlockContext.Provider value={{ code }}>
-    <div
-      className={cn(
-        "relative w-full overflow-hidden rounded-md border bg-background text-foreground",
-        className
-      )}
-      {...props}
-    >
-      <div className="relative">
-        <SyntaxHighlighter
-          className="overflow-hidden dark:hidden"
-          codeTagProps={{
-            className: "font-mono text-sm",
-          }}
-          customStyle={{
-            margin: 0,
-            padding: "1rem",
-            fontSize: "0.875rem",
-            background: "hsl(var(--background))",
-            color: "hsl(var(--foreground))",
-          }}
-          language={language}
-          lineNumberStyle={{
-            color: "hsl(var(--muted-foreground))",
-            paddingRight: "1rem",
-            minWidth: "2.5rem",
-          }}
-          showLineNumbers={showLineNumbers}
-          style={oneLight}
-        >
-          {code}
-        </SyntaxHighlighter>
-        <SyntaxHighlighter
-          className="hidden overflow-hidden dark:block"
-          codeTagProps={{
-            className: "font-mono text-sm",
-          }}
-          customStyle={{
-            margin: 0,
-            padding: "1rem",
-            fontSize: "0.875rem",
-            background: "hsl(var(--background))",
-            color: "hsl(var(--foreground))",
-          }}
-          language={language}
-          lineNumberStyle={{
-            color: "hsl(var(--muted-foreground))",
-            paddingRight: "1rem",
-            minWidth: "2.5rem",
-          }}
-          showLineNumbers={showLineNumbers}
-          style={oneDark}
-        >
-          {code}
-        </SyntaxHighlighter>
-        {children && (
-          <div className="absolute top-2 right-2 flex items-center gap-2">
-            {children}
-          </div>
+}: CodeBlockProps) => {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+
+  return (
+    <CodeBlockContext.Provider value={{ code }}>
+      <div
+        className={cn(
+          "relative w-full overflow-hidden rounded-md border bg-background text-foreground",
+          className
         )}
+        {...props}
+      >
+        <div className="relative">
+          <Highlight
+            theme={isDark ? themes.oneDark : themes.oneLight}
+            code={code}
+            language={language}
+          >
+            {({ className: highlightClassName, style, tokens, getLineProps, getTokenProps }) => (
+              <pre
+                className={cn(highlightClassName, "overflow-auto")}
+                style={{
+                  ...style,
+                  margin: 0,
+                  padding: "1rem",
+                  fontSize: "0.875rem",
+                  background: "hsl(var(--background))",
+                  color: "hsl(var(--foreground))",
+                }}
+              >
+                {tokens.map((line, i) => (
+                  <div key={i} {...getLineProps({ line })}>
+                    {showLineNumbers && (
+                      <span
+                        style={{
+                          color: "hsl(var(--muted-foreground))",
+                          paddingRight: "1rem",
+                          minWidth: "2.5rem",
+                          display: "inline-block",
+                          textAlign: "right",
+                          userSelect: "none",
+                        }}
+                      >
+                        {i + 1}
+                      </span>
+                    )}
+                    {line.map((token, key) => (
+                      <span key={key} {...getTokenProps({ token })} />
+                    ))}
+                  </div>
+                ))}
+              </pre>
+            )}
+          </Highlight>
+          {children && (
+            <div className="absolute top-2 right-2 flex items-center gap-2">
+              {children}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  </CodeBlockContext.Provider>
-);
+    </CodeBlockContext.Provider>
+  );
+};
 
 export type CodeBlockCopyButtonProps = ComponentProps<typeof Button> & {
   onCopy?: () => void;
