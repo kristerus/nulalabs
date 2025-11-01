@@ -6,7 +6,8 @@ import type {
   WorkflowToolCall,
 } from "@/lib/types/workflow";
 import { detectPhaseFromTools } from "./phaseDetector";
-import { extractWorkflowMetadata } from "./metadataExtractor";
+import { extractWorkflowMetadata, extractPhase } from "./metadataExtractor";
+import { extractInsightWithPhase } from "./simpleInsightExtractor";
 import { nanoid } from "nanoid";
 
 /**
@@ -15,10 +16,21 @@ import { nanoid } from "nanoid";
 function extractToolCalls(message: UIMessage): WorkflowToolCall[] {
   if (!message.parts) return [];
 
+  const timestamp = new Date().toISOString().substring(11, 23);
+  console.log(`🔧 [${timestamp}] [Workflow/ToolExtract] Message parts:`, message.parts.map(p => p.type));
+
   const toolCalls: WorkflowToolCall[] = [];
 
   for (const part of message.parts) {
-    if (part.type.startsWith("tool-")) {
+    // Check for both "tool-" prefix (standard) and "dynamic-tool" (MCP tools)
+    if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
+      console.log(`🔍 [${timestamp}] [Workflow/ToolExtract] Found tool part:`, {
+        type: part.type,
+        hasToolName: "toolName" in part,
+        toolName: "toolName" in part ? (part as any).toolName : undefined,
+        keys: Object.keys(part)
+      });
+
       // Check if it's a tool-call part with toolName
       if ("toolName" in part && typeof part.toolName === "string") {
         // Find corresponding result
@@ -45,27 +57,38 @@ function extractToolCalls(message: UIMessage): WorkflowToolCall[] {
 
 /**
  * Extract reasoning/thinking text from a message
+ * Collects ALL text from all parts (including multiple steps)
  */
 function extractReasoningText(message: UIMessage): string {
-  if (!message.parts) return "";
+  const timestamp = new Date().toISOString().substring(11, 23);
 
-  const reasoningParts = message.parts.filter((p) => p.type === "reasoning");
-  if (reasoningParts.length > 0) {
-    return reasoningParts.map((p) => ("text" in p ? p.text : "")).join("\n");
+  if (!message.parts) {
+    console.log(`❌ [${timestamp}] [Workflow/Extract] No parts in message`);
+    return "";
   }
 
-  // Fallback: look for text before ---ANSWER--- delimiter
-  const textParts = message.parts.filter((p) => p.type === "text");
-  if (textParts.length > 0) {
-    const fullText = textParts.map((p) => ("text" in p ? p.text : "")).join("\n");
-    const delimiterIndex = fullText.indexOf("---ANSWER---");
-    if (delimiterIndex > 0) {
-      return fullText.substring(0, delimiterIndex);
+  // Collect ALL text from all parts (messages can have multiple steps)
+  const allText: string[] = [];
+
+  for (const part of message.parts) {
+    if ('text' in part && typeof part.text === 'string' && part.text.trim()) {
+      allText.push(part.text);
     }
-    return fullText;
   }
 
-  return "";
+  if (allText.length === 0) {
+    console.log(`❌ [${timestamp}] [Workflow/Extract] No text parts found in ${message.parts.length} parts`);
+    return "";
+  }
+
+  // Join all text parts with newlines
+  const fullText = allText.join("\n\n");
+
+  console.log(`📄 [${timestamp}] [Workflow/Extract] Collected ${fullText.length} chars from ${allText.length} text parts`);
+
+  // Return ALL text - we want the complete response including analysis
+  // Don't truncate at ---ANSWER--- delimiter, we need the full context for insights
+  return fullText.trim();
 }
 
 /**
@@ -99,33 +122,113 @@ function hasArtifacts(message: UIMessage): boolean {
  * Build workflow graph from conversation messages
  */
 export function buildWorkflowGraph(messages: UIMessage[]): WorkflowGraph {
+  const timestamp = new Date().toISOString().substring(11, 23);
   const nodes: WorkflowNode[] = [];
   const edges: WorkflowEdge[] = [];
 
+  console.log(`🏗️ [${timestamp}] [Workflow/Build] START - Processing ${messages.length} messages:`,
+    messages.map(m => `${m.role}(${m.id.substring(0, 8)})`).join(' -> ')
+  );
+
   let currentPhase = "Initial";
   let lastNodeId: string | null = null;
+  let lastUserQuery: string | null = null; // Track last user query to attach to assistant response
   const phaseNodes: Map<string, string[]> = new Map(); // Track nodes by phase for parallel grouping
 
   messages.forEach((message, idx) => {
     if (message.role === "user") {
-      // User query node
-      const nodeId = `user-${message.id}`;
-      const queryText = getMessageText(message);
+      // Store user query to attach to next assistant response
+      // Don't create a separate node for user messages
+      lastUserQuery = getMessageText(message);
+      console.log(`👤 [${timestamp}] [Workflow/Build] Stored user query: "${lastUserQuery.substring(0, 50)}..."`);
+    } else if (message.role === "assistant") {
+      const timestamp = new Date().toISOString().substring(11, 23);
 
-      nodes.push({
+      // Extract reasoning and metadata
+      const reasoningText = extractReasoningText(message);
+
+      const metadata = extractWorkflowMetadata(reasoningText);
+      const toolCalls = extractToolCalls(message);
+
+      console.log(`🔍 [${timestamp}] [Workflow/Build] Found ${toolCalls.length} tool calls in assistant message`);
+
+      // Determine phase from metadata or tools or text content
+      if (metadata?.phase) {
+        currentPhase = metadata.phase;
+      } else if (toolCalls.length > 0) {
+        currentPhase = detectPhaseFromTools(toolCalls, reasoningText);
+      } else {
+        // Try to detect phase from text content even without tool calls
+        const detectedPhase = extractPhase(reasoningText);
+        if (detectedPhase) {
+          currentPhase = detectedPhase;
+        }
+      }
+
+      // CREATE NODE FOR EVERY ASSISTANT RESPONSE (not just those with tools)
+      // This creates a narrative of the analysis, not a technical trace
+      const nodeId = `response-${message.id}`;
+      const status: "completed" | "in_progress" | "error" =
+        toolCalls.some((t) => t.isError) ? "error" : "completed";
+
+      // Extract insight: use metadata if available, otherwise extract from text
+      let finalMetadata = metadata;
+
+      if (!finalMetadata?.insight && reasoningText) {
+        const simpleInsight = extractInsightWithPhase(reasoningText, currentPhase);
+        if (simpleInsight) {
+          finalMetadata = {
+            ...finalMetadata,
+            insight: simpleInsight,
+          };
+        }
+      }
+
+      const node = {
         id: nodeId,
-        type: "user_query",
-        label: extractQueryLabel(message),
+        type: "analysis" as const,
+        label: `${currentPhase}`,
         phase: currentPhase,
         messageId: message.id,
         messageIndex: idx,
-        userQuery: queryText,
+        userQuery: lastUserQuery || undefined, // Attach the user query that prompted this response
+        toolCalls,  // Keep for internal use but won't display in UI
+        fullResponse: reasoningText || undefined,
         timestamp: Date.now(),
-        status: "completed",
+        status,
+        metadata: finalMetadata || undefined,
+      };
+
+      console.log(`✅ [${timestamp}] [Workflow/Build] Created response node:`, {
+        nodeId,
+        phase: currentPhase,
+        hasUserQuery: !!lastUserQuery,
+        hasMetadata: !!node.metadata,
+        metadataInsight: node.metadata?.insight,
+        fullResponseLength: node.fullResponse?.length || 0,
+        fullResponsePreview: node.fullResponse?.substring(0, 100)
       });
 
-      // Link to previous node sequentially
-      if (lastNodeId) {
+      nodes.push(node);
+      lastUserQuery = null; // Clear after attaching to response
+
+      // Handle parallel vs sequential edges
+      if (metadata?.isParallel && lastNodeId) {
+        // Parallel: Add to phase group
+        if (!phaseNodes.has(currentPhase)) {
+          phaseNodes.set(currentPhase, []);
+        }
+        phaseNodes.get(currentPhase)!.push(nodeId);
+
+        // Connect from previous node
+        edges.push({
+          id: `${lastNodeId}-${nodeId}`,
+          source: lastNodeId,
+          target: nodeId,
+          type: "parallel",
+        });
+      } else if (lastNodeId) {
+        // Sequential
         edges.push({
           id: `${lastNodeId}-${nodeId}`,
           source: lastNodeId,
@@ -135,98 +238,6 @@ export function buildWorkflowGraph(messages: UIMessage[]): WorkflowGraph {
       }
 
       lastNodeId = nodeId;
-    } else if (message.role === "assistant") {
-      // Extract reasoning and metadata
-      const reasoningText = extractReasoningText(message);
-      const metadata = extractWorkflowMetadata(reasoningText);
-      const toolCalls = extractToolCalls(message);
-
-      // Determine phase
-      if (metadata?.phase) {
-        currentPhase = metadata.phase;
-      } else if (toolCalls.length > 0) {
-        currentPhase = detectPhaseFromTools(toolCalls, reasoningText);
-      }
-
-      // Create analysis node if there are tool calls
-      if (toolCalls.length > 0) {
-        const nodeId = `analysis-${message.id}`;
-        const status: "completed" | "in_progress" | "error" =
-          toolCalls.some((t) => t.isError) ? "error" : "completed";
-
-        nodes.push({
-          id: nodeId,
-          type: "analysis",
-          label: `${currentPhase}`,
-          phase: currentPhase,
-          messageId: message.id,
-          messageIndex: idx,
-          toolCalls,
-          timestamp: Date.now(),
-          status,
-          metadata: metadata || undefined,
-        });
-
-        // Handle parallel vs sequential edges
-        if (metadata?.isParallel && lastNodeId) {
-          // Parallel: Add to phase group
-          if (!phaseNodes.has(currentPhase)) {
-            phaseNodes.set(currentPhase, []);
-          }
-          phaseNodes.get(currentPhase)!.push(nodeId);
-
-          // Connect from previous node
-          edges.push({
-            id: `${lastNodeId}-${nodeId}`,
-            source: lastNodeId,
-            target: nodeId,
-            type: "parallel",
-          });
-        } else if (lastNodeId) {
-          // Sequential
-          edges.push({
-            id: `${lastNodeId}-${nodeId}`,
-            source: lastNodeId,
-            target: nodeId,
-            type: "sequential",
-          });
-        }
-
-        lastNodeId = nodeId;
-      }
-
-      // Create visualization node if there are artifacts
-      if (hasArtifacts(message)) {
-        const nodeId = `viz-${message.id}`;
-
-        // Count artifact blocks
-        const text = getMessageText(message);
-        const artifactCount = (text.match(/```jsx/g) || []).length;
-
-        nodes.push({
-          id: nodeId,
-          type: "visualization",
-          label: `Visualization`,
-          phase: currentPhase,
-          messageId: message.id,
-          messageIndex: idx,
-          artifacts: [`artifact-${message.id}`], // Simplified - actual extraction happens in chat page
-          timestamp: Date.now(),
-          status: "completed",
-        });
-
-        // Link to previous node
-        if (lastNodeId) {
-          edges.push({
-            id: `${lastNodeId}-${nodeId}`,
-            source: lastNodeId,
-            target: nodeId,
-            type: "sequential",
-          });
-        }
-
-        lastNodeId = nodeId;
-      }
     }
   });
 

@@ -26,8 +26,8 @@ export function useWorkflowLayout(graph: WorkflowGraph): {
     // Configure graph layout
     dagreGraph.setGraph({
       rankdir: "LR", // Left to right
-      nodesep: 100, // Horizontal spacing between nodes
-      ranksep: 150, // Vertical spacing between ranks
+      nodesep: 200, // Horizontal spacing between nodes (increased for better visibility)
+      ranksep: 300, // Vertical spacing between ranks (increased for better visibility)
       marginx: 50,
       marginy: 50,
     });

@@ -4,23 +4,24 @@ import type { WorkflowMetadata } from "@/lib/types/workflow";
  * Extract workflow metadata from AI reasoning text
  *
  * Looks for annotations like:
- * [WORKFLOW: type="parallel" phase="QC Assessment"]
- * [WORKFLOW: type="sequential" phase="Data Loading"]
+ * [WORKFLOW: type="parallel" phase="QC Assessment" insight="Key finding here"]
+ * [WORKFLOW: type="sequential" phase="Data Loading" insight="Loaded 245 metabolites"]
  */
 export function extractWorkflowMetadata(text: string): WorkflowMetadata | null {
   if (!text) return null;
 
-  // Match workflow annotation pattern
-  const workflowPattern = /\[WORKFLOW:\s*type="(parallel|sequential)"(?:\s+phase="([^"]+)")?\]/i;
+  // Match workflow annotation pattern with optional insight field
+  const workflowPattern = /\[WORKFLOW:\s*type="(parallel|sequential)"(?:\s+phase="([^"]+)")?(?:\s+insight="([^"]+)")?\]/i;
   const match = text.match(workflowPattern);
 
   if (!match) return null;
 
-  const [, type, phase] = match;
+  const [, type, phase, insight] = match;
 
   return {
     isParallel: type === "parallel",
     phase: phase || undefined,
+    insight: insight || undefined,
     description: text.trim(),
   };
 }
@@ -35,15 +36,16 @@ export function extractAllWorkflowAnnotations(
   if (!text) return [];
 
   const results: Array<{ metadata: WorkflowMetadata; index: number }> = [];
-  const workflowPattern = /\[WORKFLOW:\s*type="(parallel|sequential)"(?:\s+phase="([^"]+)")?\]/gi;
+  const workflowPattern = /\[WORKFLOW:\s*type="(parallel|sequential)"(?:\s+phase="([^"]+)")?(?:\s+insight="([^"]+)")?\]/gi;
 
   let match: RegExpExecArray | null;
   while ((match = workflowPattern.exec(text)) !== null) {
-    const [, type, phase] = match;
+    const [, type, phase, insight] = match;
     results.push({
       metadata: {
         isParallel: type === "parallel",
         phase: phase || undefined,
+        insight: insight || undefined,
         description: text.substring(
           Math.max(0, match.index - 50),
           Math.min(text.length, match.index + match[0].length + 50)

@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  Lightbulb,
 } from "lucide-react";
 import type { WorkflowNode as WorkflowNodeData } from "@/lib/types/workflow";
 
@@ -67,6 +68,17 @@ export function WorkflowNode({ data }: NodeProps) {
   const artifactCount = nodeData.artifacts?.length || 0;
   const toolCount = nodeData.toolCalls?.length || 0;
 
+  // Only log on mount or when fullResponse changes (avoid spam from re-renders)
+  // Comment out to reduce console noise - uncomment for debugging
+  // const timestamp = new Date().toISOString().substring(11, 23);
+  // console.log(`🖼️ [${timestamp}] [WorkflowNode] Rendering:`, {
+  //   id: nodeData.id,
+  //   phase: nodeData.phase,
+  //   hasMetadata: !!nodeData.metadata,
+  //   metadataInsight: nodeData.metadata?.insight,
+  //   fullResponseLength: nodeData.fullResponse?.length || 0,
+  // });
+
   return (
     <div className="relative">
       {/* Source Handle (left) */}
@@ -112,20 +124,25 @@ export function WorkflowNode({ data }: NodeProps) {
 
         {/* Content */}
         <div className="p-3 space-y-2">
-          {/* Label */}
+          {/* User Query (PRIMARY - at top) */}
           {nodeData.userQuery && (
-            <p className="text-xs text-muted-foreground line-clamp-2">
-              {nodeData.userQuery}
-            </p>
+            <div className="mb-2">
+              <p className="text-sm font-medium text-foreground line-clamp-2 leading-relaxed">
+                {nodeData.userQuery}
+              </p>
+            </div>
           )}
 
-          {/* Tool calls */}
-          {toolCount > 0 && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Activity size={12} />
-              <span>
-                {toolCount} tool{toolCount > 1 ? "s" : ""}
-              </span>
+          {/* Key Insight (Secondary) */}
+          {nodeData.metadata?.insight && (
+            <div className="flex items-start gap-2 bg-primary/10 rounded p-2 border border-primary/20">
+              <Lightbulb
+                size={14}
+                className="flex-shrink-0 mt-0.5 text-primary"
+              />
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {nodeData.metadata.insight}
+              </p>
             </div>
           )}
 

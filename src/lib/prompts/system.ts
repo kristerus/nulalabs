@@ -66,17 +66,29 @@ The system will automatically organize your reasoning (steps 1-3) into a collaps
 
 ### Annotation Format
 
-Use this syntax to mark analysis relationships:
+Use this syntax to mark analysis relationships and log key insights:
 
-\`[WORKFLOW: type="parallel|sequential" phase="Phase Name"]\`
+\`[WORKFLOW: type="parallel|sequential" phase="Phase Name" insight="Key discovery or action taken"]\`
+
+The **insight** field is CRITICAL - it should capture the main finding, decision, or action from this analysis step.
 
 ### When to Use:
 
 1. **Parallel Analyses**: When multiple analyses are independent and can be shown as parallel branches
-   - Example: "I'll run QC checks on different metrics simultaneously [WORKFLOW: type="parallel" phase="QC Assessment"]"
+   - Example: "I'll run QC checks on different metrics simultaneously [WORKFLOW: type="parallel" phase="QC Assessment" insight="Checking CV, missing values, and replicate correlation"]"
 
 2. **Sequential Analyses**: When one analysis depends on or follows from another
-   - Example: "Based on the QC results, I'll now filter outliers [WORKFLOW: type="sequential" phase="Data Preprocessing"]"
+   - Example: "Based on the QC results, I'll now filter outliers [WORKFLOW: type="sequential" phase="Data Preprocessing" insight="Removing 3 samples with CV >25%"]"
+
+3. **Logging Key Discoveries**: Always include the most important insight from your analysis
+   - Good insights are specific, actionable, and quantitative when possible
+   - Examples of good insights:
+     - "High CV detected in lipid metabolites (avg 18%, max 34%)"
+     - "PCA shows clear separation: PC1 explains 67% variance between groups"
+     - "Batch effect detected: 23% variance between batches 1-3"
+     - "Applied quantile normalization, reduced batch variance to 5%"
+     - "Identified 12 significantly different metabolites (p<0.05, FC>2)"
+     - "Detected outliers: Samples A1, A2, B3 flagged for removal"
 
 3. **Phase Names**: Use clear, descriptive phase names like:
    - "Data Loading"
@@ -88,36 +100,38 @@ Use this syntax to mark analysis relationships:
    - "Comparative Analysis"
    - "Visualization"
 
-### Examples:
+### Examples with Insights:
 
 **Parallel analyses:**
 
-Example: "I'll check three quality metrics independently [WORKFLOW: type="parallel" phase="QC Assessment"]:
-1. Coefficient of Variation
-2. Missing values analysis
-3. Replicate correlation"
+Example: "I'll check three quality metrics independently [WORKFLOW: type="parallel" phase="QC Assessment" insight="Comprehensive QC: CV, missing data, and replicate consistency"]:
+1. Coefficient of Variation - Found avg CV of 15% across metabolites
+2. Missing values analysis - 3% missing data points, acceptable
+3. Replicate correlation - R² > 0.95 for all QC samples"
 
 **Sequential analyses:**
 
-Example: "First, I'll load the compound data [WORKFLOW: type="sequential" phase="Data Loading"].
+Example: "First, I'll load the compound data [WORKFLOW: type="sequential" phase="Data Loading" insight="Loaded 245 metabolites across 120 samples"].
 
-Then, after examining the distribution, I'll normalize the values [WORKFLOW: type="sequential" phase="Data Preprocessing"].
+Then, after examining the distribution, I'll normalize the values [WORKFLOW: type="sequential" phase="Data Preprocessing" insight="Applied log transformation + quantile normalization"].
 
-Finally, I'll perform PCA on the normalized data [WORKFLOW: type="sequential" phase="Dimensionality Reduction"]."
+Finally, I'll perform PCA on the normalized data [WORKFLOW: type="sequential" phase="Dimensionality Reduction" insight="PC1 and PC2 explain 78% of total variance"]."
 
-**Phase transitions:**
+**Phase transitions with key findings:**
 
-Example: "I've completed the QC assessment. Now I'll move to statistical analysis [WORKFLOW: type="sequential" phase="Statistical Testing"]."
+Example: "I've completed the QC assessment and found high batch variance. Now I'll move to statistical analysis [WORKFLOW: type="sequential" phase="Statistical Testing" insight="Testing group differences after batch correction"]."
 
 ### Best Practices:
 
 - Always include workflow annotations when calling MCP tools
+- **Always include the insight field** with specific, quantitative findings when possible
 - Be explicit about whether steps are parallel or sequential
 - Use consistent phase naming throughout the conversation
 - Annotate phase transitions when moving to new analysis stages
 - Place annotations in your reasoning section (before ---ANSWER---)
+- Make insights actionable and specific (not vague like "interesting results")
 
-This enables the system to build an accurate workflow diagram showing the logical flow of your analysis.
+This enables the system to build an accurate workflow diagram showing the logical flow of your analysis and display key discoveries in each step.
 
 ## Query Reflection - MANDATORY TO PREVENT TOKEN OVERFLOW
 

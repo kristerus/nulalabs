@@ -1,7 +1,7 @@
 'use client';
 
 import { useChat } from '@ai-sdk/react';
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { MessageItem } from '@/components/chat/MessageItem';
 import {
   Conversation,
@@ -14,6 +14,7 @@ import { extractFollowupQuestion } from '@/lib/utils/followup';
 import { Send, Loader2, Network } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { RightPanel } from '@/components/RightPanel';
+import { HiddenArtifactPool } from '@/components/artifact/HiddenArtifactPool';
 import { buildWorkflowGraph } from '@/lib/workflow/workflowBuilder';
 
 export default function ChatPage() {
@@ -21,6 +22,12 @@ export default function ChatPage() {
   const [suggestedFollowup, setSuggestedFollowup] = useState<string | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const { messages, sendMessage, status, error } = useChat();
+
+  // Ref to store the last complete workflow graph (preserves during streaming)
+  const lastCompleteWorkflowRef = useRef<{ nodes: any[]; edges: any[] }>({ nodes: [], edges: [] });
+
+  // State to hold node insights extracted via LLM (nodeId -> insight)
+  const [nodeInsights, setNodeInsights] = useState<Record<string, string>>({});
 
   // Extract follow-up question from last assistant message
   useEffect(() => {
@@ -51,9 +58,9 @@ export default function ChatPage() {
   }, [messages, status]);
 
   // Extract all artifacts from messages for the notebook
-  // Use stringified messages length and IDs to prevent unnecessary recomputation
+  // Use stringified messages length, IDs, and part counts to prevent unnecessary recomputation
   const messageSignature = useMemo(
-    () => messages.map(m => m.id).join(','),
+    () => messages.map(m => `${m.id}-${m.parts?.length || 0}`).join(','),
     [messages]
   );
 
@@ -161,8 +168,149 @@ export default function ChatPage() {
   const hasArtifacts = artifacts.length > 0;
 
   // Check if there's workflow data (messages with analysis)
-  const workflowGraph = useMemo(() => buildWorkflowGraph(messages), [messages]);
+  // CRITICAL: Only rebuild workflow when NOT streaming to ensure we capture complete responses
+  // If we rebuild during streaming, we'll only get partial text from incomplete messages
+  const workflowGraph = useMemo(() => {
+    const timestamp = new Date().toISOString().substring(11, 23);
+
+    if (status === 'streaming') {
+      console.log(`⏸️ [${timestamp}] [Workflow/Chat] Skipping rebuild during streaming, using cached graph with ${lastCompleteWorkflowRef.current.nodes.length} nodes`);
+      // Return previous graph during streaming to preserve visualization
+      return lastCompleteWorkflowRef.current;
+    }
+
+    console.log(`🔄 [${timestamp}] [Workflow/Chat] Building graph from ${messages.length} complete messages`);
+    const baseGraph = buildWorkflowGraph(messages);
+
+    // Enrich nodes with LLM-extracted insights
+    const enrichedGraph = {
+      ...baseGraph,
+      nodes: baseGraph.nodes.map(node => {
+        const llmInsight = nodeInsights[node.id];
+        if (llmInsight && !node.metadata?.insight) {
+          return {
+            ...node,
+            metadata: {
+              ...node.metadata,
+              insight: llmInsight
+            }
+          };
+        }
+        return node;
+      })
+    };
+
+    console.log(`✅ [${timestamp}] [Workflow/Chat] Built graph with ${enrichedGraph.nodes.length} nodes`);
+    if (enrichedGraph.nodes.length > 0) {
+      const firstNode = enrichedGraph.nodes[0];
+      console.log(`📊 [${timestamp}] [Workflow/Chat] First node sample:`, {
+        id: firstNode.id,
+        phase: firstNode.phase,
+        hasMetadata: !!firstNode.metadata,
+        metadataInsight: firstNode.metadata?.insight,
+        fullResponseLength: firstNode.fullResponse?.length || 0,
+        fullResponsePreview: firstNode.fullResponse?.substring(0, 100)
+      });
+    }
+
+    // Cache the enriched graph
+    lastCompleteWorkflowRef.current = enrichedGraph;
+
+    return enrichedGraph;
+  }, [
+    messages,
+    messageSignature,
+    status, // Add status to dependencies so we rebuild when streaming completes
+    nodeInsights // Rebuild when insights are extracted
+  ]);
   const hasWorkflow = workflowGraph.nodes.length > 0;
+
+  // Extract insights for nodes that don't have them yet (using LLM)
+  useEffect(() => {
+    const extractMissingInsights = async () => {
+      console.log(`🔍 [Insight Extraction] Effect triggered - status: ${status}, nodes: ${workflowGraph.nodes.length}`);
+
+      if (status === 'streaming' || workflowGraph.nodes.length === 0) {
+        console.log(`⏸️ [Insight Extraction] Skipping - streaming or no nodes`);
+        return;
+      }
+
+      // Debug: Log node states
+      workflowGraph.nodes.forEach((node, idx) => {
+        console.log(`📋 [Insight Extraction] Node ${idx}:`, {
+          id: node.id.substring(0, 25),
+          hasMetadataInsight: !!node.metadata?.insight,
+          metadataInsight: node.metadata?.insight?.substring(0, 50),
+          hasStateInsight: !!nodeInsights[node.id],
+          fullResponseLength: node.fullResponse?.length || 0
+        });
+      });
+
+      // Find nodes without insights that have fullResponse text
+      // AND that we haven't already extracted insights for
+      const nodesNeedingInsights = workflowGraph.nodes.filter(
+        node =>
+          !node.metadata?.insight &&
+          !nodeInsights[node.id] && // Skip if we already have insight in state
+          node.fullResponse &&
+          node.fullResponse.length > 50
+      );
+
+      if (nodesNeedingInsights.length === 0) {
+        console.log(`✋ [Insight Extraction] No nodes need insights - all have either metadata.insight or are in state`);
+        return;
+      }
+
+      console.log(`🤖 [Insight Extraction] Found ${nodesNeedingInsights.length} nodes needing LLM insight extraction`);
+
+      // Extract insights for each node (in parallel)
+      const insightPromises = nodesNeedingInsights.map(async (node) => {
+        try {
+          console.log(`🔄 [Insight Extraction] Calling API for node ${node.id.substring(0, 20)}...`);
+          const response = await fetch('/api/extract-insight', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              responseText: node.fullResponse,
+              phase: node.phase
+            })
+          });
+
+          if (!response.ok) {
+            console.error(`❌ [Insight Extraction] Failed to extract insight for node ${node.id}`);
+            return null;
+          }
+
+          const { insight } = await response.json();
+          console.log(`✅ [Insight Extraction] Extracted for node ${node.id.substring(0, 20)}: "${insight}"`);
+
+          return { nodeId: node.id, insight };
+        } catch (error) {
+          console.error(`❌ [Insight Extraction] Error extracting insight for node ${node.id}:`, error);
+          return null;
+        }
+      });
+
+      const results = await Promise.all(insightPromises);
+
+      // Add extracted insights to state
+      // This will trigger a re-render and the useMemo will merge them into the graph
+      setNodeInsights(prev => {
+        const newInsights = { ...prev };
+        let addedCount = 0;
+        results.forEach(result => {
+          if (result?.nodeId && result.insight) {
+            newInsights[result.nodeId] = result.insight;
+            addedCount++;
+          }
+        });
+        console.log(`📝 [Insight Extraction] Added ${addedCount} insights to state`);
+        return newInsights;
+      });
+    };
+
+    extractMissingInsights();
+  }, [workflowGraph.nodes.length, status]); // Run when graph changes and not streaming
 
   // Show right panel if either artifacts or workflow exists AND panel is open
   const showRightPanel = (hasArtifacts || (hasWorkflow && rightPanelOpen));
@@ -345,6 +493,9 @@ export default function ChatPage() {
           />
         </div>
       )}
+
+      {/* Hidden artifact pool for download functionality */}
+      <HiddenArtifactPool artifacts={artifacts} />
     </div>
   );
 }

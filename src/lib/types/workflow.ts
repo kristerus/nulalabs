@@ -14,6 +14,7 @@ export type WorkflowEdgeType = "sequential" | "parallel";
 export interface WorkflowMetadata {
   isParallel?: boolean;
   phase?: string;
+  insight?: string;
   description?: string;
 }
 
@@ -40,6 +41,7 @@ export interface WorkflowNode {
   toolCalls?: WorkflowToolCall[];
   artifacts?: string[];
   userQuery?: string;
+  fullResponse?: string; // Complete AI response text for this step (for reference)
   timestamp: number;
   status: WorkflowNodeStatus;
   metadata?: WorkflowMetadata;

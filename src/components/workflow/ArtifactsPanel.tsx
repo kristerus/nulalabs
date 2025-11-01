@@ -1,8 +1,11 @@
-import { X, BarChart3, Activity, AlertCircle } from "lucide-react";
+import { X, BarChart3, Activity, AlertCircle, Lightbulb, ChevronDown, ChevronRight, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ArtifactDownloadButton } from "@/components/artifact/ArtifactDownloadButton";
 import type { WorkflowNode } from "@/lib/types/workflow";
+import { useState } from "react";
 
 interface ArtifactsPanelProps {
   node: WorkflowNode;
@@ -12,6 +15,7 @@ interface ArtifactsPanelProps {
 export function ArtifactsPanel({ node, onClose }: ArtifactsPanelProps) {
   const toolCount = node.toolCalls?.length || 0;
   const artifactCount = node.artifacts?.length || 0;
+  const [fullResponseOpen, setFullResponseOpen] = useState(false);
 
   return (
     <div className="fixed right-0 top-0 bottom-0 w-96 bg-background border-l shadow-lg flex flex-col z-50">
@@ -43,69 +47,52 @@ export function ArtifactsPanel({ node, onClose }: ArtifactsPanelProps) {
             </Badge>
           </div>
 
-          {/* User Query */}
-          {node.userQuery && (
-            <div>
-              <h4 className="text-sm font-medium mb-2">Query</h4>
-              <p className="text-sm text-muted-foreground bg-muted p-3 rounded-lg">
-                {node.userQuery}
-              </p>
-            </div>
-          )}
-
-          {/* Tool Calls */}
-          {toolCount > 0 && (
+          {/* Key Insight (Primary) */}
+          {node.metadata?.insight && (
             <div>
               <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
-                <Activity size={14} />
-                Tool Calls ({toolCount})
+                <Lightbulb size={14} className="text-primary" />
+                Key Insight
               </h4>
-              <div className="space-y-2">
-                {node.toolCalls?.map((tool, idx) => (
-                  <div
-                    key={idx}
-                    className="bg-muted p-3 rounded-lg space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <code className="text-xs font-mono">{tool.toolName}</code>
-                      {tool.isError && (
-                        <Badge variant="destructive" className="text-xs">
-                          <AlertCircle size={10} className="mr-1" />
-                          Error
-                        </Badge>
-                      )}
-                    </div>
-
-                    {/* Arguments */}
-                    {Object.keys(tool.args).length > 0 && (
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">
-                          Arguments:
-                        </p>
-                        <pre className="text-[10px] bg-background p-2 rounded overflow-x-auto">
-                          {JSON.stringify(tool.args, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-
-                    {/* Result (truncated) */}
-                    {tool.result && (
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">
-                          Result:
-                        </p>
-                        <pre className="text-[10px] bg-background p-2 rounded overflow-x-auto max-h-32">
-                          {typeof tool.result === "string"
-                            ? tool.result
-                            : JSON.stringify(tool.result, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                ))}
+              <div className="bg-primary/10 border border-primary/20 rounded-lg p-3">
+                <p className="text-sm font-medium leading-relaxed">
+                  {node.metadata.insight}
+                </p>
               </div>
             </div>
           )}
+
+          {/* Full Response (Collapsible) */}
+          {node.fullResponse && (
+            <Collapsible open={fullResponseOpen} onOpenChange={setFullResponseOpen}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start h-auto py-2 px-3"
+                >
+                  <div className="flex items-center gap-2 text-sm">
+                    {fullResponseOpen ? (
+                      <ChevronDown size={14} />
+                    ) : (
+                      <ChevronRight size={14} />
+                    )}
+                    <FileText size={14} />
+                    <span>Full Analysis ({node.fullResponse.length} chars)</span>
+                  </div>
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="bg-muted/50 p-3 rounded-lg mt-2 max-h-64 overflow-y-auto">
+                  <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                    {node.fullResponse}
+                  </p>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+
+          {/* NOTE: Tool Calls section removed - technical details not relevant to users */}
 
           {/* Artifacts */}
           {artifactCount > 0 && (
@@ -114,14 +101,26 @@ export function ArtifactsPanel({ node, onClose }: ArtifactsPanelProps) {
                 <BarChart3 size={14} />
                 Visualizations ({artifactCount})
               </h4>
-              <div className="bg-muted p-3 rounded-lg">
-                <p className="text-sm text-muted-foreground">
-                  {artifactCount} visualization{artifactCount > 1 ? "s" : ""}{" "}
-                  generated in this step.
-                </p>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Scroll to message #{node.messageIndex + 1} in the chat to view.
-                </p>
+              <div className="space-y-2">
+                {node.artifacts?.map((artifactId, idx) => (
+                  <div
+                    key={artifactId}
+                    className="bg-muted p-3 rounded-lg flex items-center justify-between gap-2"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <BarChart3 size={14} className="flex-shrink-0" />
+                      <span className="text-sm truncate">
+                        Visualization {idx + 1}
+                      </span>
+                    </div>
+                    <ArtifactDownloadButton
+                      artifactId={artifactId}
+                      phase={node.phase}
+                      index={idx}
+                      variant="icon"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -156,6 +155,16 @@ export function ArtifactsPanel({ node, onClose }: ArtifactsPanelProps) {
               {new Date(node.timestamp).toLocaleString()}
             </p>
           </div>
+
+          {/* User Query (Secondary - at bottom) */}
+          {node.userQuery && (
+            <div className="pt-2 border-t border-border/50">
+              <h4 className="text-xs font-medium mb-2 text-muted-foreground">Original Query</h4>
+              <p className="text-xs text-muted-foreground/70 bg-muted/50 p-2 rounded">
+                {node.userQuery}
+              </p>
+            </div>
+          )}
         </div>
       </ScrollArea>
     </div>
