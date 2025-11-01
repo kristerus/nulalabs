@@ -3,7 +3,6 @@
 import { useChat } from '@ai-sdk/react';
 import { useState, useMemo, useEffect } from 'react';
 import { MessageItem } from '@/components/chat/MessageItem';
-import { LabNotebook } from '@/components/notebook/LabNotebook';
 import {
   Conversation,
   ConversationContent,
@@ -14,12 +13,13 @@ import { suggestions } from '@/lib/data/suggestions';
 import { extractFollowupQuestion } from '@/lib/utils/followup';
 import { Send, Loader2, Network } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { WorkflowModal } from '@/components/workflow/WorkflowModal';
+import { RightPanel } from '@/components/RightPanel';
+import { buildWorkflowGraph } from '@/lib/workflow/workflowBuilder';
 
 export default function ChatPage() {
   const [input, setInput] = useState('');
   const [suggestedFollowup, setSuggestedFollowup] = useState<string | null>(null);
-  const [workflowOpen, setWorkflowOpen] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const { messages, sendMessage, status, error } = useChat();
 
   // Extract follow-up question from last assistant message
@@ -157,8 +157,22 @@ export default function ChatPage() {
     }
   };
 
-  // Determine if notebook should be shown
+  // Determine if right panel should be shown
   const hasArtifacts = artifacts.length > 0;
+
+  // Check if there's workflow data (messages with analysis)
+  const workflowGraph = useMemo(() => buildWorkflowGraph(messages), [messages]);
+  const hasWorkflow = workflowGraph.nodes.length > 0;
+
+  // Show right panel if either artifacts or workflow exists AND panel is open
+  const showRightPanel = (hasArtifacts || (hasWorkflow && rightPanelOpen));
+
+  // Auto-open panel when artifacts appear (existing behavior for notebook)
+  useEffect(() => {
+    if (hasArtifacts && !rightPanelOpen) {
+      setRightPanelOpen(true);
+    }
+  }, [hasArtifacts, rightPanelOpen]);
 
   return (
     <div className="flex h-screen relative bg-background">
@@ -223,11 +237,11 @@ export default function ChatPage() {
           </div>
         </div>
       ) : (
-        // Chat Area - Expands to full width when no artifacts, 50% when notebook is present
-        <div className={`flex flex-col transition-all duration-300 ${hasArtifacts ? 'w-1/2 border-r' : 'w-full'} border-border relative`}>
+        // Chat Area - Expands to full width when panel closed, 50% when panel open
+        <div className={`flex flex-col transition-all duration-300 ${showRightPanel ? 'w-1/2 border-r' : 'w-full'} border-border relative`}>
           {/* Header */}
           <div className="bg-card backdrop-blur-sm border-b border-border px-3 sm:px-4 md:px-6 py-3 sm:py-4 md:py-5 flex-shrink-0">
-            <div className={`flex items-center justify-between ${hasArtifacts ? '' : 'max-w-7xl mx-auto'}`}>
+            <div className={`flex items-center justify-between ${showRightPanel ? '' : 'max-w-7xl mx-auto'}`}>
               <div>
                 <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
                   <span className="inline-block w-2 h-2 sm:w-2.5 sm:h-2.5 bg-primary rounded-full" />
@@ -237,15 +251,17 @@ export default function ChatPage() {
                   AI-powered data analysis with MCP tools
                 </p>
               </div>
-              {messages.length > 0 && (
+              {hasWorkflow && (
                 <Button
-                  variant="outline"
+                  variant={rightPanelOpen && !hasArtifacts ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setWorkflowOpen(true)}
+                  onClick={() => setRightPanelOpen(!rightPanelOpen)}
                   className="gap-2"
                 >
                   <Network size={16} />
-                  <span className="hidden sm:inline">Workflow</span>
+                  <span className="hidden sm:inline">
+                    {rightPanelOpen && !hasArtifacts ? "Hide" : "Workflow"}
+                  </span>
                 </Button>
               )}
             </div>
@@ -253,7 +269,7 @@ export default function ChatPage() {
 
           {/* Messages Container with AI SDK Conversation */}
           <Conversation className="flex-1">
-            <ConversationContent className={`${hasArtifacts ? 'px-3 sm:px-4 md:px-6' : 'max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 xl:px-12'} w-full space-y-3 sm:space-y-4`}>
+            <ConversationContent className={`${showRightPanel ? 'px-3 sm:px-4 md:px-6' : 'max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 xl:px-12'} w-full space-y-3 sm:space-y-4`}>
               {messages.map((message, idx) => (
                 <MessageItem
                   key={message.id}
@@ -275,7 +291,7 @@ export default function ChatPage() {
 
           {/* Input - Fixed at bottom */}
           <div className="bg-card backdrop-blur-sm border-t border-border p-6 flex-shrink-0">
-            <form onSubmit={handleSubmit} className={hasArtifacts ? '' : 'max-w-7xl mx-auto'}>
+            <form onSubmit={handleSubmit} className={showRightPanel ? '' : 'max-w-7xl mx-auto'}>
               <div className="flex gap-3">
                 <div className="relative flex-1">
                   <input
@@ -316,15 +332,19 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Lab Notebook - Right 50% */}
-      {hasArtifacts && <LabNotebook artifacts={artifacts} />}
-
-      {/* Workflow Modal */}
-      <WorkflowModal
-        open={workflowOpen}
-        onOpenChange={setWorkflowOpen}
-        messages={messages}
-      />
+      {/* Right Panel - Shows workflow, notebook, or both with tabs */}
+      {showRightPanel && (
+        <div className="w-1/2 h-full">
+          <RightPanel
+            messages={messages}
+            artifacts={artifacts}
+            hasWorkflow={hasWorkflow}
+            hasArtifacts={hasArtifacts}
+            initialTab={hasArtifacts ? "notebook" : "workflow"}
+            onClose={() => setRightPanelOpen(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }
