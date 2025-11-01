@@ -12,12 +12,14 @@ import {
 import { Suggestion, Suggestions } from '@/components/ai-elements/elements/suggestion';
 import { suggestions } from '@/lib/data/suggestions';
 import { extractFollowupQuestion } from '@/lib/utils/followup';
-import { Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, Network } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { WorkflowModal } from '@/components/workflow/WorkflowModal';
 
 export default function ChatPage() {
   const [input, setInput] = useState('');
   const [suggestedFollowup, setSuggestedFollowup] = useState<string | null>(null);
+  const [workflowOpen, setWorkflowOpen] = useState(false);
   const { messages, sendMessage, status, error } = useChat();
 
   // Extract follow-up question from last assistant message
@@ -225,14 +227,27 @@ export default function ChatPage() {
         <div className={`flex flex-col transition-all duration-300 ${hasArtifacts ? 'w-1/2 border-r' : 'w-full'} border-border relative`}>
           {/* Header */}
           <div className="bg-card backdrop-blur-sm border-b border-border px-3 sm:px-4 md:px-6 py-3 sm:py-4 md:py-5 flex-shrink-0">
-            <div className={hasArtifacts ? '' : 'max-w-7xl mx-auto'}>
-              <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
-                <span className="inline-block w-2 h-2 sm:w-2.5 sm:h-2.5 bg-primary rounded-full" />
-                AI Assistant
-              </h1>
-              <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                AI-powered data analysis with MCP tools
-              </p>
+            <div className={`flex items-center justify-between ${hasArtifacts ? '' : 'max-w-7xl mx-auto'}`}>
+              <div>
+                <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 sm:w-2.5 sm:h-2.5 bg-primary rounded-full" />
+                  AI Assistant
+                </h1>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+                  AI-powered data analysis with MCP tools
+                </p>
+              </div>
+              {messages.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWorkflowOpen(true)}
+                  className="gap-2"
+                >
+                  <Network size={16} />
+                  <span className="hidden sm:inline">Workflow</span>
+                </Button>
+              )}
             </div>
           </div>
 
@@ -303,6 +318,13 @@ export default function ChatPage() {
 
       {/* Lab Notebook - Right 50% */}
       {hasArtifacts && <LabNotebook artifacts={artifacts} />}
+
+      {/* Workflow Modal */}
+      <WorkflowModal
+        open={workflowOpen}
+        onOpenChange={setWorkflowOpen}
+        messages={messages}
+      />
     </div>
   );
 }

@@ -164,6 +164,18 @@ ${contextPrompt ? '\n\nREMINDER: Check the "Session Data Context" section above 
               hasText: !!step.text
             });
 
+            // Extract and log workflow metadata from reasoning
+            if (step.text) {
+              const workflowMatch = step.text.match(/\[WORKFLOW:\s*type="(parallel|sequential)"(?:\s+phase="([^"]+)")?\]/i);
+              if (workflowMatch) {
+                console.log('[Workflow Metadata]', {
+                  type: workflowMatch[1],
+                  phase: workflowMatch[2] || 'unspecified',
+                  stepNumber: stepCount,
+                });
+              }
+            }
+
             // Log tool errors for debugging
             if (step.toolResults) {
               for (const result of step.toolResults) {
