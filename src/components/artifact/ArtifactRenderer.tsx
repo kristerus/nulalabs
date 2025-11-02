@@ -7,9 +7,10 @@ import { AlertCircle } from 'lucide-react';
 interface ArtifactRendererProps {
   code: string;
   data?: any;
+  artifactId?: string;
 }
 
-const ArtifactRendererComponent = ({ code, data }: ArtifactRendererProps) => {
+const ArtifactRendererComponent = ({ code, data, artifactId }: ArtifactRendererProps) => {
   const [Component, setComponent] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +48,11 @@ const ArtifactRendererComponent = ({ code, data }: ArtifactRendererProps) => {
   }
 
   return (
-    <div className="bg-background border border-border rounded-lg p-6 w-full transition-all shadow-lg" style={{ minHeight: '500px' }}>
+    <div
+      id={artifactId}
+      className="bg-background border border-border rounded-lg p-6 w-full transition-all shadow-lg"
+      style={{ minHeight: '500px' }}
+    >
       <Component />
     </div>
   );
